@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  tracker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.tracker
+    container_name: bittorrent_tracker
+    ports:
+      - "8000:8000"
+    networks:
+      - p2p_net
+
+  peer1:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.peer
+    container_name: bittorrent_peer1
+    environment:
+      - PEER_ID=peer1
+      - PEER_PORT=6001
+      - TRACKER_URL=http://tracker:8000
+    ports:
+      - "6001:6001"
+    depends_on:
+      - tracker
+    networks:
+      - p2p_net
+
+  peer2:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.peer
+    container_name: bittorrent_peer2
+    environment:
+      - PEER_ID=peer2
+      - PEER_PORT=6002
+      - TRACKER_URL=http://tracker:8000
+    ports:
+      - "6002:6002"
+    depends_on:
+      - tracker
+    networks:
+      - p2p_net
+
+  peer3:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.peer
+    container_name: bittorrent_peer3
+    environment:
+      - PEER_ID=peer3
+      - PEER_PORT=6003
+      - TRACKER_URL=http://tracker:8000
+    ports:
+      - "6003:6003"
+    depends_on:
+      - tracker
+    networks:
+      - p2p_net
+
+networks:
+  p2p_net:
+    driver: bridge
