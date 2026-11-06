@@ -22,6 +22,16 @@ class FileMetadata:
     def to_dict(self) -> dict:
         return asdict(self)
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "FileMetadata":
+        """Khởi tạo đối tượng FileMetadata từ một dictionary."""
+        valid_fields = {
+            "file_id", "file_name", "file_size", "chunk_size", 
+            "num_chunks", "chunk_hashes", "file_hash", "tracker_url"
+        }
+        filtered_data = {k: v for k, v in data.items() if k in valid_fields}
+        return cls(**filtered_data)
+
     def save_json(self, file_path: str) -> None:
         """Lưu metadata ra file định dạng JSON."""
         with open(file_path, "w", encoding="utf-8") as f:
@@ -32,4 +42,4 @@ class FileMetadata:
         """Đọc metadata từ file JSON."""
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return cls(**data)
+        return cls.from_dict(data)

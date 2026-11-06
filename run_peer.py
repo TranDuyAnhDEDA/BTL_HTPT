@@ -132,11 +132,22 @@ def action_download_file(peer: PeerNode):
         print(f" -> Lỗi khi truy vấn Tracker: {e}")
         return
 
+    other_peers = [
+        p for p in active_peers 
+        if not (p["ip"] == peer.host and p["port"] == peer.port) 
+        and p.get("peer_id") != peer.peer_id
+    ]
+
     print(f"\n[BẮT ĐẦU TẢI P2P FILE '{metadata.file_name}']")
     print(f" * Dung lượng: {metadata.file_size:,} bytes | Số mảnh: {metadata.num_chunks}")
-    print(f" * Tìm thấy {len(active_peers)} nguồn tải trong mạng:")
-    for p in active_peers:
+    print(f" * Tìm thấy {len(other_peers)} nguồn tải từ các peer khác:")
+    for p in other_peers:
         print(f"    -> Peer {p['peer_id']} ({p['ip']}:{p['port']}) | Giữ chunks: {p['bitfield']}")
+
+    if not other_peers:
+        print("\n -> CẢNH BÁO: Hiện chưa có Peer nào khác online đang giữ file này!")
+        print("    (Hãy đảm bảo máy Seeder vẫn đang chạy terminal và giữ kết nối tới Tracker)")
+        return
 
     # Đảm bảo socket server của mình đang chạy để hỗ trợ vừa tải vừa chia sẻ (Seed while Leeching)
     peer.start_upload_server()
