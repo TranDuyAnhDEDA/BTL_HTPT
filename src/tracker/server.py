@@ -135,6 +135,12 @@ def api_real_failover():
     return global_runner.run_real_failover()
 
 
+@app.post("/api/real_demo/seed_while_leech")
+def api_real_seed_while_leech():
+    """Gọi thực thi kịch bản vừa tải vừa upload: Peer 4 kết nối tải Chunk 0 từ Peer 3 qua Socket thật."""
+    return global_runner.run_real_seed_while_leech()
+
+
 @app.post("/api/custom/upload")
 async def api_upload_custom_file(file: UploadFile = File(...)):
     """Tiếp nhận file bất kỳ do người dùng tự tải lên, cắt thành chunks thật và seed qua Socket."""

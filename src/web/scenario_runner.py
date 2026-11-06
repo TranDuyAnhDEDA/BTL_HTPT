@@ -314,3 +314,53 @@ class ScenarioRunner:
             "output_file": output_file,
             "logs": logs
         }
+
+    def run_real_seed_while_leech(self) -> Dict[str, Any]:
+        """KỊCH BẢN 4: Peer 3 tải Chunk 0, sau đó Peer 4 kết nối Socket sang Peer 3 để tải Chunk 0 thật 100%."""
+        metadata = self.setup_environment()
+        p1_dir = os.path.join(DEMO_STORAGE, "peer1")
+        p2_dir = os.path.join(DEMO_STORAGE, "peer2")
+        p3_dir = os.path.join(DEMO_STORAGE, "peer3")
+        p4_dir = os.path.join(DEMO_STORAGE, "peer4")
+
+        # Đảm bảo dọn thư mục peer4 trước khi tải
+        if os.path.exists(p4_dir):
+            shutil.rmtree(p4_dir, ignore_errors=True)
+        os.makedirs(p4_dir, exist_ok=True)
+
+        p1 = PeerNode("PEER_1", "127.0.0.1", 6001, p1_dir, self.tracker_url)
+        p2 = PeerNode("PEER_2", "127.0.0.1", 6002, p2_dir, self.tracker_url)
+        p3 = PeerNode("PEER_3", "127.0.0.1", 6003, p3_dir, self.tracker_url)
+        p4 = PeerNode("PEER_4", "127.0.0.1", 6005, p4_dir, self.tracker_url)
+
+        p1.start_upload_server()
+        p2.start_upload_server()
+        p3.start_upload_server()
+        p1.owned_chunks[self.file_id] = set(range(metadata.num_chunks))
+        p2.owned_chunks[self.file_id] = set(range(metadata.num_chunks))
+
+        # Bước 1: Peer 3 tải Chunk 0 từ Peer 1 qua socket
+        p3.download_chunk("127.0.0.1", 6001, self.file_id, 0, metadata.chunk_hashes[0])
+
+        # Bước 2: Peer 4 (Port 6005) kết nối sang Peer 3 (Port 6003) tải Chunk 0 thật
+        # File nhị phân chunk_0.bin sẽ được ghi thẳng vào ổ cứng của Peer 4!
+        p4_ok = p4.download_chunk("127.0.0.1", 6003, self.file_id, 0, metadata.chunk_hashes[0])
+
+        # Bước 3: Peer 3 tải nốt các chunks còn lại
+        output_file = os.path.join(p3_dir, "downloaded_video.mp4")
+        p3.download_file_parallel(metadata, output_file, max_threads=4, override_peers=[
+            {"peer_id": "PEER_1", "ip": "127.0.0.1", "port": 6001, "bitfield": list(range(metadata.num_chunks))},
+            {"peer_id": "PEER_2", "ip": "127.0.0.1", "port": 6002, "bitfield": list(range(metadata.num_chunks))}
+        ])
+
+        p1.stop()
+        p2.stop()
+        p3.stop()
+        p4.stop()
+
+        p4_chunk_file = os.path.join(p4_dir, "chunks", self.file_id, "chunk_0.bin")
+        return {
+            "success": p4_ok,
+            "peer4_chunk_path": p4_chunk_file,
+            "peer4_chunk_size": os.path.getsize(p4_chunk_file) if os.path.exists(p4_chunk_file) else 0
+        }

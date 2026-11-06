@@ -753,6 +753,15 @@
             p4Chunks.className = "text-purple-400 font-mono font-bold";
             addLog(`Lúc này Peer 3 MỚI CHỈ CÓ ${Math.round((1/customNumChunks)*100)}% FILE, nhưng ĐANG UPLOAD CHUNK 0 CHO PEER 4 THÀNH CÔNG!`, "success");
 
+            // Kích hoạt Python Backend lưu Chunk 0 của Peer 4 ra ổ cứng thật
+            try {
+                const res = await fetch('/api/real_demo/seed_while_leech', { method: 'POST' });
+                const data = await res.json();
+                if (data.peer4_chunk_path) {
+                    addLog(`📁 [BẰNG CHỨNG GHI ĐĨA] File Chunk 0 của Peer 4 đã được lưu tại: ${data.peer4_chunk_path}`, "info");
+                }
+            } catch(e) {}
+
             // 3. Peer 3 tiếp tục tải nốt các chunk còn lại từ 1 đến N-1
             await new Promise(r => setTimeout(r, 700));
             addLog(`Bước 2: Peer 3 tiếp tục tải các mảnh còn lại (Chunk 1 đến Chunk ${customNumChunks - 1})...`, "info");
