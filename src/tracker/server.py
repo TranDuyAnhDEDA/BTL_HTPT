@@ -147,10 +147,17 @@ async def api_upload_custom_file(file: UploadFile = File(...)):
     return metadata_dict
 
 
+@app.post("/api/peer1/status")
+def api_set_peer1_status(online: bool):
+    """Bật/tắt tiến trình Peer 1 thật theo yêu cầu từ giao diện Web."""
+    global_runner.set_peer1_status(online)
+    return {"status": "ok", "peer1_online": online}
+
+
 @app.post("/api/custom/download/{file_id}")
-def api_download_custom_file(file_id: str):
+def api_download_custom_file(file_id: str, p1_online: bool = True):
     """Kích hoạt Peer 3 tải file của người dùng qua cổng Socket TCP thật 100%."""
-    return global_runner.download_custom_file(file_id)
+    return global_runner.download_custom_file(file_id, p1_online=p1_online)
 
 
 @app.post("/register_file", status_code=status.HTTP_201_CREATED)

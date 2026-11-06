@@ -45,21 +45,44 @@ class ScenarioRunner:
                 pass
             self.active_p2 = None
 
-    def _ensure_seeders_running(self, file_id: str, metadata: FileMetadata):
+    def _ensure_seeders_running(self, file_id: str, metadata: FileMetadata, p1_online: bool = True):
         """Đảm bảo Peer 1 và Peer 2 mở Socket Server lắng nghe upload các chunks."""
         p1_dir = os.path.join(DEMO_STORAGE, "peer1")
         p2_dir = os.path.join(DEMO_STORAGE, "peer2")
 
-        if not self.active_p1 or not self.active_p1._is_running:
-            self.active_p1 = PeerNode("PEER_1", "127.0.0.1", 6001, p1_dir, self.tracker_url)
-            self.active_p1.start_upload_server()
+        if p1_online:
+            if not self.active_p1 or not self.active_p1._is_running:
+                self.active_p1 = PeerNode("PEER_1", "127.0.0.1", 6001, p1_dir, self.tracker_url)
+                self.active_p1.start_upload_server()
+            self.active_p1.owned_chunks[file_id] = set(range(metadata.num_chunks))
+        else:
+            if self.active_p1:
+                try:
+                    self.active_p1.stop()
+                except Exception:
+                    pass
+                self.active_p1 = None
 
         if not self.active_p2 or not self.active_p2._is_running:
             self.active_p2 = PeerNode("PEER_2", "127.0.0.1", 6002, p2_dir, self.tracker_url)
             self.active_p2.start_upload_server()
 
-        self.active_p1.owned_chunks[file_id] = set(range(metadata.num_chunks))
         self.active_p2.owned_chunks[file_id] = set(range(metadata.num_chunks))
+
+    def set_peer1_status(self, online: bool):
+        """Bật hoặc tắt Peer 1 (Cổng 6001) theo yêu cầu từ giao diện Web."""
+        if not online:
+            if self.active_p1:
+                try:
+                    self.active_p1.stop()
+                except Exception:
+                    pass
+                self.active_p1 = None
+        else:
+            if not self.active_p1 or not self.active_p1._is_running:
+                p1_dir = os.path.join(DEMO_STORAGE, "peer1")
+                self.active_p1 = PeerNode("PEER_1", "127.0.0.1", 6001, p1_dir, self.tracker_url)
+                self.active_p1.start_upload_server()
 
     def upload_and_share_custom_file(self, file_name: str, file_bytes: bytes) -> Dict[str, Any]:
         """Nhận file thật do người dùng tải lên, cắt thành các chunk thật và kích hoạt Seeder."""
@@ -104,13 +127,13 @@ class ScenarioRunner:
 
         return metadata.to_dict()
 
-    def download_custom_file(self, file_id: str) -> Dict[str, Any]:
+    def download_custom_file(self, file_id: str, p1_online: bool = True) -> Dict[str, Any]:
         """Peer 3 mở Socket TCP thật kết nối tải file người dùng vừa upload về máy."""
         metadata = self.custom_files.get(file_id)
         if not metadata:
             raise FileNotFoundError(f"Không tìm thấy file ID: {file_id}")
 
-        self._ensure_seeders_running(file_id, metadata)
+        self._ensure_seeders_running(file_id, metadata, p1_online=p1_online)
 
         p3_dir = os.path.join(DEMO_STORAGE, "peer3")
         downloads_dir = os.path.join(DEMO_STORAGE, "peer3_downloads")
@@ -118,10 +141,17 @@ class ScenarioRunner:
         output_file = os.path.join(downloads_dir, metadata.file_name)
 
         p3 = PeerNode("PEER_3", "127.0.0.1", 6003, p3_dir, self.tracker_url)
-        active_sources = [
-            {"peer_id": "PEER_1", "ip": "127.0.0.1", "port": 6001, "bitfield": list(range(metadata.num_chunks))},
+        
+        active_sources = []
+        if p1_online and self.active_p1 and self.active_p1._is_running:
+            active_sources.append(
+                {"peer_id": "PEER_1", "ip": "127.0.0.1", "port": 6001, "bitfield": list(range(metadata.num_chunks))}
+            )
+        
+        # Peer 2 luôn online làm nguồn tải dự phòng
+        active_sources.append(
             {"peer_id": "PEER_2", "ip": "127.0.0.1", "port": 6002, "bitfield": list(range(metadata.num_chunks))}
-        ]
+        )
 
         t_start = time.time()
         success = p3.download_file_parallel(metadata, output_file, max_threads=4, override_peers=active_sources)

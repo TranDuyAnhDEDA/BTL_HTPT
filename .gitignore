@@ -13,6 +13,8 @@ ENV/
 
 # P2P Runtime Storage & Uploaded Binary Files
 demo_live_storage/
+downloads/
+peer_storage_*/
 *.bin
 *.mp4
 *.mkv

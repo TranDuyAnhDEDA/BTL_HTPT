@@ -497,8 +497,14 @@
         // BẤM NÚT TẮT MÁY / BẬT LẠI TRÊN THẺ PEER 1
         async function togglePeer1() {
             isPeer1Online = !isPeer1Online;
+            window.isPeer1Online = isPeer1Online;
             const btn = document.getElementById("p1-toggle-btn");
             const badge = document.getElementById("p1-badge");
+
+            // Báo cho backend Python tắt/bật cổng Socket 6001 thật
+            try {
+                fetch(`/api/peer1/status?online=${isPeer1Online}`, { method: 'POST' });
+            } catch(e) {}
 
             if (isPeer1Online) {
                 btn.className = "px-2 py-1 rounded text-[11px] font-bold bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 transition";
@@ -513,9 +519,10 @@
                 badge.textContent = "OFFLINE (SẬP)";
                 addLog("[CRITICAL] Bạn vừa bấm TẮT MÁY Peer 1 (127.0.0.1:6001)!", "error");
 
-                // NẾU PEER 3 CHƯA TẢI XONG: TỰ ĐỘNG CHUYỂN NGUỒN SANG PEER 2 ĐỂ LOAD NGAY!
-                if (downloadedChunksCount < customNumChunks) {
-                    addLog(`[FAILOVER ENGINE KICKED IN] Phát hiện Peer 1 sập nguồn! Peer 3 tự động chuyển toàn bộ nguồn sang Peer 2 (127.0.0.1:6002) để tải tiếp tất cả các chunk còn lại...`, "warning");
+                // NẾU PEER 3 ĐANG DỞ TIẾN ĐỘ: TỰ ĐỘNG CHUYỂN NGUỒN SANG PEER 2 ĐỂ CỨU NGAY!
+                const total = window.customNumChunks || customNumChunks;
+                if (downloadedChunksCount > 0 && downloadedChunksCount < total) {
+                    addLog(`[FAILOVER ENGINE KICKED IN] Phát hiện Peer 1 sập nguồn! Peer 3 tự động chuyển toàn bộ nguồn sang Peer 2 (127.0.0.1:6002)...`, "warning");
                     await runFailoverToPeer2();
                 }
             }
@@ -852,23 +859,33 @@
             const total = window.customNumChunks || customNumChunks;
             if (!fileId) return;
 
-            addLog(`>>> [DOWNLOAD REAL SOCKET] Peer 3 kích hoạt kết nối Socket TCP tải file '${fileId}' (${total} chunks)...`, "info");
+            const p1Active = Boolean(window.isPeer1Online);
+
+            if (!p1Active) {
+                addLog(`>>> [FAILOVER MODE] Peer 1 đang TẮT MÁY! Toàn bộ ${total} chunks sẽ tự động chuyển sang tải từ Peer 2 (Port 6002)...`, "warning");
+            } else {
+                addLog(`>>> [PARALLEL MODE] Peer 3 kích hoạt kết nối Socket TCP tải song song '${fileId}' (${total} chunks) từ Peer 1 và Peer 2...`, "info");
+            }
             
             // Bật hiệu ứng downloading trên các ô chunk
             for (let i = 0; i < total; i++) {
-                const src = i % 2 === 0 ? "Peer 1 (6001)" : "Peer 2 (6002)";
+                const src = p1Active 
+                    ? (i % 2 === 0 ? "Peer 1 (Port 6001)" : "Peer 2 (Port 6002)") 
+                    : "Peer 2 (Port 6002 - Failover)";
                 setChunkUI(i, "downloading", src);
             }
             updateProgress(0, total);
 
             try {
-                const res = await fetch(`/api/custom/download/${fileId}`, { method: "POST" });
+                const res = await fetch(`/api/custom/download/${fileId}?p1_online=${p1Active}`, { method: "POST" });
                 const result = await res.json();
 
                 if (result.success) {
                     const delayStep = Math.max(50, Math.floor(1200 / total));
                     for (let i = 0; i < total; i++) {
-                        const src = i % 2 === 0 ? "Peer 1 (Port 6001)" : "Peer 2 (Port 6002)";
+                        const src = p1Active 
+                            ? (i % 2 === 0 ? "Peer 1 (Port 6001)" : "Peer 2 (Port 6002)") 
+                            : "Peer 2 (Port 6002 - Failover)";
                         setChunkUI(i, "completed", src);
                         updateProgress(i + 1, total);
                         addLog(`Peer 3: Đã tải & xác thực SHA-256 Chunk ${i} từ ${src} ✓`, "info");
