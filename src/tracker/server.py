@@ -262,3 +262,35 @@ def heartbeat(data: HeartbeatRequest):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Peer '{peer_id}' chưa báo danh. Vui lòng gọi /announce trước."
         )
+
+
+@app.get("/files")
+def list_files():
+    """Trả về danh sách tất cả các file đã đăng ký trên Tracker."""
+    file_list = []
+    for f_id, meta in registered_files.items():
+        peers_count = len(file_peers.get(f_id, {}))
+        file_list.append({
+            "file_id": f_id,
+            "file_name": meta.get("file_name"),
+            "file_size": meta.get("file_size"),
+            "num_chunks": meta.get("num_chunks"),
+            "chunk_size": meta.get("chunk_size"),
+            "file_hash": meta.get("file_hash"),
+            "peers_count": peers_count
+        })
+    return {"files": file_list}
+
+
+@app.get("/active_peers")
+def list_active_peers():
+    """Trả về danh sách tất cả các Peer đang online trên mạng."""
+    now = time.time()
+    peers = []
+    for p_id, last_time in list(peer_heartbeats.items()):
+        if now - last_time <= PEER_TIMEOUT_SECONDS:
+            peers.append({
+                "peer_id": p_id,
+                "last_seen_seconds_ago": round(now - last_time, 1)
+            })
+    return {"active_peers": peers, "count": len(peers)}

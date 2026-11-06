@@ -15,6 +15,18 @@ from .protocol import send_packet, recv_packet
 logger = logging.getLogger("Peer")
 
 
+def get_local_ip() -> str:
+    """Tự động phát hiện địa chỉ IP LAN của máy (ví dụ 192.168.1.x) để các máy khác kết nối được."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
 class PeerNode:
     """
     Đại diện cho một Nút mạng P2P (Peer):
@@ -25,14 +37,25 @@ class PeerNode:
     def __init__(
         self,
         peer_id: str,
-        host: str = "127.0.0.1",
+        host: Optional[str] = None,
         port: int = 6001,
         storage_dir: str = "./storage",
-        tracker_url: str = "http://127.0.0.1:8000"
+        tracker_url: str = "http://127.0.0.1:8000",
+        listen_host: str = "0.0.0.0"
     ):
         self.peer_id = peer_id
-        self.host = host
+
+        # Nếu host không truyền, ưu tiên biến môi trường PEER_HOST hoặc tự phát hiện IP LAN
+        env_host = os.environ.get("PEER_HOST")
+        if host is not None:
+            self.host = host
+        elif env_host:
+            self.host = env_host
+        else:
+            self.host = get_local_ip()
+
         self.port = port
+        self.listen_host = listen_host
         self.storage_dir = storage_dir
         self.tracker_url = tracker_url
 
@@ -69,13 +92,14 @@ class PeerNode:
             return
         self._server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._server_sock.bind((self.host, self.port))
+        # Lắng nghe trên tất cả các card mạng (0.0.0.0) để nhận kết nối từ cả localhost và LAN
+        self._server_sock.bind((self.listen_host, self.port))
         self._server_sock.listen(20)
         self._is_running = True
 
         self._server_thread = threading.Thread(target=self._listen_loop, daemon=True)
         self._server_thread.start()
-        self._log("INFO", f"Máy chủ Upload đã mở cổng lắng nghe tại {self.host}:{self.port}")
+        self._log("INFO", f"Máy chủ Upload đã mở cổng lắng nghe tại {self.listen_host}:{self.port} (Quảng bá IP: {self.host})")
 
     def _listen_loop(self):
         while self._is_running:
@@ -248,7 +272,11 @@ class PeerNode:
             peers = self.get_peers_from_tracker(file_id)
 
         # Lọc bỏ chính mình khỏi danh sách nguồn tải
-        available_peers = [p for p in peers if not (p["ip"] == self.host and p["port"] == self.port)]
+        available_peers = [
+            p for p in peers 
+            if not (p["ip"] == self.host and p["port"] == self.port) 
+            and p.get("peer_id") != self.peer_id
+        ]
 
         if not available_peers:
             self._log("ERROR", "Không tìm thấy peer nào khác trong mạng để tải!")
@@ -373,4 +401,64 @@ class PeerNode:
         except Exception as e:
             self._log("ERROR", f"Lỗi tra cứu peers từ Tracker: {e}")
         return []
+
+    def start_heartbeat(self, interval: float = 5.0):
+        """Bắt đầu luồng gửi nhịp tim (Heartbeat) định kỳ tới Tracker."""
+        if self._heartbeat_thread and self._heartbeat_thread.is_alive():
+            return
+
+        def _heartbeat_loop():
+            while self._is_running:
+                try:
+                    requests.post(
+                        f"{self.tracker_url}/heartbeat",
+                        json={"peer_id": self.peer_id},
+                        timeout=3.0
+                    )
+                except Exception:
+                    pass
+                time.sleep(interval)
+
+        self._heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
+        self._heartbeat_thread.start()
+        self._log("INFO", f"Đã kích hoạt gửi Heartbeat định kỳ mỗi {interval}s tới Tracker.")
+
+    def seed_file(self, file_path: str, chunk_size: int = 512 * 1024, custom_file_id: Optional[str] = None) -> Optional[FileMetadata]:
+        """
+        Chia nhỏ file, lưu các chunk ra đĩa, đăng ký và announce lên Tracker,
+        sau đó mở cổng Socket Server và gửi nhịp tim định kỳ.
+        """
+        from ..core.chunker import split_file
+        import hashlib
+
+        if not os.path.exists(file_path):
+            self._log("ERROR", f"Không tìm thấy file nguồn: {file_path}")
+            return None
+
+        file_name = os.path.basename(file_path)
+        file_id = custom_file_id or ("f_" + hashlib.md5(file_name.encode()).hexdigest()[:6])
+        chunks_dir = os.path.join(self.storage_dir, "chunks", file_id)
+
+        self._log("INFO", f"Đang chia nhỏ file '{file_name}' thành chunks {chunk_size // 1024} KB...")
+        metadata = split_file(
+            file_path=file_path,
+            output_chunks_dir=chunks_dir,
+            tracker_url=self.tracker_url,
+            chunk_size=chunk_size,
+            file_id=file_id
+        )
+
+        with self._chunks_lock:
+            self.owned_chunks[file_id] = set(range(metadata.num_chunks))
+
+        # Đăng ký và Announce lên Tracker
+        if self.register_file_to_tracker(metadata):
+            self.announce_to_tracker(file_id)
+
+        # Khởi động Socket Server và Heartbeat
+        self.start_upload_server()
+        self.start_heartbeat()
+
+        self._log("INFO", f"SẴN SÀNG CHIA SẺ! File ID: '{file_id}' ({metadata.num_chunks} chunks x {metadata.chunk_size // 1024} KB)")
+        return metadata
 
