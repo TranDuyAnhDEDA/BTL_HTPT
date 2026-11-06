@@ -284,13 +284,28 @@ def list_files():
 
 @app.get("/active_peers")
 def list_active_peers():
-    """Trả về danh sách tất cả các Peer đang online trên mạng."""
+    """Trả về danh sách tất cả các Peer đang online trên mạng kèm IP và Port thực tế."""
     now = time.time()
     peers = []
+
+    # Thu thập thông tin IP và Port của từng peer từ các file tham gia
+    peer_details: Dict[str, dict] = {}
+    for f_id, p_map in file_peers.items():
+        for p_id, p_info in p_map.items():
+            if now - p_info.last_seen <= PEER_TIMEOUT_SECONDS:
+                peer_details[p_id] = {
+                    "ip": p_info.ip,
+                    "port": p_info.port,
+                    "bitfield": p_info.bitfield
+                }
+
     for p_id, last_time in list(peer_heartbeats.items()):
         if now - last_time <= PEER_TIMEOUT_SECONDS:
+            info = peer_details.get(p_id, {})
             peers.append({
                 "peer_id": p_id,
+                "ip": info.get("ip", "Unknown"),
+                "port": info.get("port", 6001),
                 "last_seen_seconds_ago": round(now - last_time, 1)
             })
     return {"active_peers": peers, "count": len(peers)}
